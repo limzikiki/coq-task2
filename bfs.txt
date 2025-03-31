@@ -1,0 +1,155 @@
+Require Import Coq.Lists.List.
+Require Import Coq.Arith.PeanoNat.
+Import ListNotations.
+
+(* Define node *)
+Inductive node := Node : nat -> node.
+
+(* Node equality *)
+Definition nodes_equal (x y : node) : bool :=
+  match x, y with
+  | Node a, Node b => Nat.eqb a b
+  end.
+
+Definition graph := list (node * list node).
+
+(* Lookup neighbors of a node *)
+Fixpoint search_node (g : graph) (x : node) : list node :=
+  match g with
+  | [] => []
+  | (n, neighbors)::rest =>
+      if nodes_equal x n then neighbors
+      else search_node rest x
+  end.
+
+(* Check if a node is in a list *)
+Fixpoint node_in_list (l : list node) (n : node) : bool :=
+  match l with
+  | [] => false
+  | h::t => if nodes_equal h n then true else node_in_list t n
+  end.
+
+(* Filter out already visited nodes *)
+Fixpoint filter_new (visited : list node) (l : list node) : list node :=
+  match l with
+  | [] => []
+  | h::t =>
+      if node_in_list visited h then filter_new visited t
+      else h :: filter_new visited t
+  end.
+
+(* BFS with fuel to ensure termination *)
+Fixpoint bfs_fuel (fuel : nat) (g : graph) (queue visited : list node) : list node :=
+  match fuel with
+  | 0 => visited
+  | S f' =>
+      match queue with
+      | [] => visited
+      | h::t =>
+          if node_in_list visited h then
+            bfs_fuel f' g t visited
+          else
+            let neighbors := search_node g h in
+            let new_nodes := filter_new visited neighbors in
+            bfs_fuel f' g (t ++ new_nodes) (visited ++ [h])
+      end
+  end.
+
+
+(* Entry point to run BFS *)
+Definition run_bfs (g : graph) (start : node) : list node :=
+  bfs_fuel 100 g [start] [].
+
+(* Sample graph *)
+Definition example_graph : graph :=
+  [(Node 1, [Node 2; Node 3]);
+   (Node 2, [Node 4]);
+   (Node 3, [Node 4]);
+   (Node 4, [])].
+
+Compute run_bfs example_graph (Node 1). 
+(* Should return: [Node 1; Node 2; Node 3; Node 4] *)
+
+Definition graph_tree : graph :=
+  [(Node 1, [Node 2; Node 3]);
+   (Node 2, [Node 4; Node 5]);
+   (Node 3, []);
+   (Node 4, []);
+   (Node 5, [])].
+
+Compute run_bfs graph_tree (Node 1).
+(* Expected: [Node 1; Node 2; Node 3; Node 4; Node 5] *)
+
+(* Theorem proving BFS returns expected result *)
+Example test_bfs_result :
+  run_bfs example_graph (Node 1) = [Node 1; Node 2; Node 3; Node 4].
+Proof.
+  compute. reflexivity.
+Qed.
+
+(*
+If a node and its neighbors are part of the graph, then the node itself is in the list of nodes extracted from the graph.
+*)
+
+Theorem node_in_graph :
+  forall (g : graph) (n : node) (neighbors : list node),
+    In (n, neighbors) g -> In n (map fst g).
+Proof.
+  intros g n neighbors H.
+  induction g as [| (x, l) g' IH].
+  - simpl in H. contradiction.
+  - simpl in H. destruct H as [H1 | H2].
+    + injection H1 as Hn Hl. simpl. left. auto. 
+    + simpl. right. apply IH. apply H2.
+Qed.
+
+(* CANT TEST *)
+
+Theorem bfs_visits_if_present :
+  forall (g : graph) (start : node),
+    (exists neighbors, In (start, neighbors) g) -> In start (run_bfs g start).
+Proof.
+  intros g start H.
+  unfold run_bfs.
+  simpl.
+  destruct H as [neighbors Hin].
+  apply in_eq.
+Qed.
+  
+(*Couldn't test either*)
+Theorem bfs_visits_start :
+  forall (g : graph) (start : node),
+    In start (run_bfs g start).
+Proof.
+  intros g start.
+  unfold run_bfs.
+  simpl.
+  apply in_eq.
+Qed.
+
+  
+  (* Couldn't test it, my laptop got stuck *)
+Theorem bfs_visits_all_nodes :
+  forall (g : graph) (start : node) (n : nat),
+    (length g = n) ->
+    (forall x y, In (x, y) g -> exists p, In p y) ->
+    (forall x, In x (run_bfs g start)) ->
+    length (run_bfs g start) = n.
+Proof.
+  intros g start n Hlen Hconn Hin.
+  unfold run_bfs.
+  generalize dependent g.
+  induction n as [|n' IH].
+  - intros. simpl. destruct g; simpl in *; auto.
+  - intros. destruct g as [|(x, neighbors) g'].
+    + simpl in Hlen. discriminate.
+    + simpl in Hlen. inversion Hlen.
+      assert (Hvisit: In x (bfs_fuel 100 g [start] [])).
+      { apply Hin. simpl. auto. }
+      assert (Hnew: forall y, In y neighbors -> In y (bfs_fuel 100 g [start] [])).
+      { intros y Hy. apply Hin. right. auto. }
+      simpl. f_equal.
+      apply IH.
+      * simpl. auto.
+      * intros. apply Hconn. simpl. right. auto.
+Qed.
